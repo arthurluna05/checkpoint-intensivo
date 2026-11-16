@@ -8,6 +8,7 @@ import 'package:checkpoint_intensivo/domain/models/status_visita.dart';
 import 'package:checkpoint_intensivo/domain/models/usuario.dart';
 import 'package:checkpoint_intensivo/domain/models/visita.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:checkpoint_intensivo/data/remote/visita_remota.dart';
 
 /// Banco SQLite REAL rodando no computador (sem celular), num arquivo
 /// temporário novo a cada teste — um teste nunca enxerga dados de outro.
@@ -82,5 +83,36 @@ class AuthFalsa implements AuthService {
   Future<void> sair() async {
     _atual = null;
     _controle.add(null);
+  }
+}
+
+class RemotaFalsa implements VisitaRemota {
+  final docs = <String, VisitaRecebida>{};
+  bool offline = false;
+  int _relogioServidor = 1000;
+  int envios = 0;
+
+  /// Simula outra pessoa/aparelho gravando direto no servidor.
+  void gravarDireto(Visita v) {
+    _relogioServidor += 10;
+    docs[v.id] = VisitaRecebida(
+      v.copyWith(sincronizada: true),
+      _relogioServidor,
+    );
+  }
+
+  @override
+  Future<void> enviar(Visita visita) async {
+    if (offline) throw const FalhaRemota('offline');
+    envios++;
+    gravarDireto(visita);
+  }
+
+  @override
+  Future<List<VisitaRecebida>> alteradasDesde(int desde) async {
+    if (offline) throw const FalhaRemota('offline');
+    final lista = docs.values.where((r) => r.servidorEm > desde).toList()
+      ..sort((a, b) => a.servidorEm.compareTo(b.servidorEm));
+    return lista;
   }
 }

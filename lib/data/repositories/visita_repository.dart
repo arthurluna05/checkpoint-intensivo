@@ -1,19 +1,20 @@
+import 'dart:async';
+
 import 'package:uuid/uuid.dart';
 
 import '../../domain/models/status_visita.dart';
 import '../../domain/models/visita.dart';
 import '../local/visita_dao.dart';
+import '../sync/sincronizador.dart';
 
-/// A ÚNICA porta da UI para os dados de visitas.
-///
-/// Versão do Encontro 01: tudo fica no SQLite. Toda escrita já marca
-/// `sincronizada = false` — no Encontro 02 o Sincronizador lê essa
-/// marca para saber o que subir.
+/// Única porta da interface para os dados de visitas.
 class VisitaRepository {
-  VisitaRepository(this._dao, {DateTime Function()? relogio})
+  VisitaRepository(this._dao, this._sync, {DateTime Function()? relogio})
     : _relogio = relogio ?? DateTime.now;
 
   final VisitaDao _dao;
+  final Sincronizador _sync;
+
   static const _uuid = Uuid();
   final DateTime Function() _relogio;
 
@@ -28,8 +29,8 @@ class VisitaRepository {
     String? observacoes,
   }) async {
     final agora = _relogio();
+
     final visita = Visita(
-      // id gerado NO APARELHO: dá para criar offline, sem esperar o servidor
       id: _uuid.v4(),
       titulo: titulo.trim(),
       cliente: cliente.trim(),
@@ -40,7 +41,10 @@ class VisitaRepository {
       criadaEm: agora,
       atualizadaEm: agora,
     );
+
     await _dao.salvar(visita);
+    await _aposEscrita();
+
     return visita;
   }
 
@@ -55,14 +59,36 @@ class VisitaRepository {
         sincronizada: false,
       ),
     );
+
+    await _aposEscrita();
   }
 
-  /// Encontro 01: exclusão FÍSICA (DELETE). No Encontro 02 ela vira
-  /// exclusão lógica ("lápide"), para a exclusão chegar ao servidor.
-  Future<void> excluir(Visita visita) => _dao.apagarDeVez(visita.id);
+  /// Exclusão lógica: a visita será removida definitivamente
+  /// depois que a exclusão for enviada ao servidor.
+  Future<void> excluir(Visita visita) async {
+    await _dao.salvar(
+      visita.copyWith(
+        excluida: true,
+        atualizadaEm: _relogio(),
+        sincronizada: false,
+      ),
+    );
 
-  static String? _limpar(String? s) {
-    final t = s?.trim();
-    return (t == null || t.isEmpty) ? null : t;
+    await _aposEscrita();
+  }
+
+  Future<void> _aposEscrita() async {
+    await _sync.atualizarPendentes();
+    unawaited(_sync.sincronizar());
+  }
+
+  static String? _limpar(String? texto) {
+    final resultado = texto?.trim();
+
+    if (resultado == null || resultado.isEmpty) {
+      return null;
+    }
+
+    return resultado;
   }
 }

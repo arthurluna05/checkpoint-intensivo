@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -9,24 +10,21 @@ import 'data/auth/auth_firebase.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Carrega as configurações do Firebase.
   final ambiente = Ambiente.atual();
-
   await Firebase.initializeApp(options: ambiente.firebaseOptions);
 
-  // Inicializa a autenticação.
   final auth = FirebaseAuth.instance;
+  final firestore = FirebaseFirestore.instance;
 
-  // Conecta ao Firebase Authentication Emulator.
+  // O cache offline do app é o NOSSO SQLite. Desligamos o cache do
+  // Firestore para existir uma única fonte da verdade no aparelho.
+  firestore.settings = const Settings(persistenceEnabled: false);
+
   if (ambiente.usarEmulador) {
-    debugPrint(
-      '[Checkpoint] Auth Emulator: '
-      '${ambiente.hostEmulador}:9099',
-    );
-
+    debugPrint('[app] Firebase Emulator em ${ambiente.hostEmulador}');
     await auth.useAuthEmulator(ambiente.hostEmulador, 9099);
+    firestore.useFirestoreEmulator(ambiente.hostEmulador, 8080);
   }
 
-  // Inicia o aplicativo Checkpoint.
-  runApp(CheckpointApp(auth: AuthFirebase(auth)));
+  runApp(CheckpointApp(auth: AuthFirebase(auth), firestore: firestore));
 }
